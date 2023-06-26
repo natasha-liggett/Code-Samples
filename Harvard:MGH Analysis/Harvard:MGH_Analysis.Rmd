@@ -1,0 +1,525 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(MASS)
+library(ggplot2)
+```
+
+```{r}
+# read in data
+#### 
+```
+
+```{r}
+num_levels <- rep(NA,ncol(df))
+for(i in 1:ncol(df)){
+  df[,i] <- as.factor(df[,i])
+  num_levels[i] <- length(levels(df[,i]))
+  if(num_levels[i] == 2){
+    df[,i] <- as.numeric(df[,i])
+    df[,i] <- as.factor(df[,i])
+  }
+}
+
+```
+
+```{r}
+# function for converting data to indicators 
+indicator <- function(num_levels, col_name, df){
+  list_of_vecs <- list() 
+  vecname <- list()
+  vecnames <- rep(NA,num_levels)
+  for(i in 1:(num_levels-1)){
+    vecname <- paste0(col_name,"_",i)
+    assign(vecname,rep(NA,nrow(df)))
+    list_of_vecs[[i]]<-get(vecname) 
+  }
+  for(i in 1:nrow(df)){
+    for(j in 1:(num_levels-1)){
+      list_of_vecs[[j]][i] <- ifelse(df[i,col_name] == j,1,0)
+    }
+  }
+  for(i in 1:(num_levels-1)){
+    df[,paste0(col_name,"_",i)] <- list_of_vecs[[i]]
+  }
+  df[,col_name] <-  NULL
+  return(df)
+}
+```
+
+```{r}
+names <- colnames(df)
+for(i in 1:ncol(df)){
+  df <- indicator(num_levels[i],names[i], df)
+}
+```
+
+
+### SVM Recursive Feature Elimination: 
+
+```{r}
+library(sigFeature)
+library(SummarizedExperiment)
+library(kernlab)
+```
+
+```{r}
+svm_rfe__single_step <- function(X, y) {
+    ii <- rep(NA, ncol(X))
+    i <- 0
+    while ( any(is.na(ii)) ) {
+        not_elim_yet <- which(is.na(ii))
+        fit <- ksvm(X[,not_elim_yet], y, scaled = FALSE)
+        sv_i <- alphaindex(fit)[[1]]
+        w <- t( coef(fit)[[1]] ) %*% X[ sv_i, not_elim_yet ]
+        to_elim <- not_elim_yet[ head(order( w * w ), 1) ]
+        ii[to_elim] <- i
+        i <- i + 1
+    }
+    i - ii
+}
+```
+
+```{r}
+# specify how big of a step to take
+svm_rfe <- function(X, y, elim_frac = 1 / ncol(X)){
+    ii <- rep(NA, ncol(X))
+    i <- 0
+    while ( any(is.na(ii)) ) {
+        not_elim_yet <- which(is.na(ii))
+        n_to_elim <- ceiling ( elim_frac * length(not_elim_yet) )
+        fit <- ksvm(X[,not_elim_yet], y, scaled = FALSE)
+        sv_i <- alphaindex(fit)[[1]]
+        w <- t( coef(fit)[[1]] ) %*% X[ sv_i, not_elim_yet ]
+        to_elim <- not_elim_yet[ head(order( w * w ), n_to_elim) ]
+        ii[to_elim] <- i
+        i <- i + 1
+    }
+    i - ii
+}
+```
+
+
+```{r}
+# prints the test error of each model 
+# for binary outcomes
+svm_rfe_error <- function(X, y, elim_frac = 1 / ncol(X), test, y_test){
+    ii <- rep(NA, ncol(X))
+    i <- 0
+    while ( any(is.na(ii)) ) {
+        not_elim_yet <- which(is.na(ii))
+        print(length(not_elim_yet))
+        n_to_elim <- ceiling ( elim_frac * length(not_elim_yet) )
+        fit <- ksvm(X[,not_elim_yet], y)
+        preds <- predict(fit,test[,not_elim_yet],type = "response")
+        error <- mean(preds != y_test)
+        print(error)
+        sv_i <- alphaindex(fit)[[1]]
+        w <- t( coef(fit)[[1]] ) %*% X[ sv_i, not_elim_yet ]
+        to_elim <- not_elim_yet[ head(order( w * w ), n_to_elim) ]
+        ii[to_elim] <- i
+        i <- i + 1
+    }
+    i - ii
+}
+```
+
+```{r}
+# prints the test error of each model
+# for continuous outcomes
+
+svm_rfe_error2 <- function(X, y, elim_frac = 1 / ncol(X), test, y_test){
+    ii <- rep(NA, ncol(X))
+    i <- 0
+    while ( any(is.na(ii)) ) {
+        not_elim_yet <- which(is.na(ii))
+        print(length(not_elim_yet))
+        n_to_elim <- ceiling ( elim_frac * length(not_elim_yet) )
+        fit <- ksvm(X[,not_elim_yet], y)
+        preds <- predict(fit,test[,not_elim_yet],type = "response")
+        error <- mean((preds - y_test)^2)
+        print(error)
+        sv_i <- alphaindex(fit)[[1]]
+        w <- t( coef(fit)[[1]] ) %*% X[ sv_i, not_elim_yet ]
+        to_elim <- not_elim_yet[ head(order( w * w ), n_to_elim) ]
+        ii[to_elim] <- i
+        i <- i + 1
+    }
+    i - ii
+}
+```
+
+
+# Depression: 
+
+```{r}
+dep_train <- depression[train_idx]
+dep_train <- as.factor(dep_train)
+dep_test <- depression[-train_idx]
+dep_test <- as.factor(dep_test)
+
+#depression w/ errors: 
+X <- data.matrix(train)
+y <- dep_train
+X_test <- data.matrix(test)
+y_test <- dep_test
+I <- svm_rfe_error(X, y, test = X_test, y_test = y_test)
+```
+
+
+# Hypertension:
+
+```{r}
+hyp_train <- hypertension[train_idx]
+hyp_train <- as.factor(hyp_train)
+hyp_test <- hypertension[-train_idx]
+hyp_test <- as.factor(hyp_test)
+
+X <- data.matrix(train)
+y <- hyp_train
+X_test <- data.matrix(test)
+y_test <- hyp_test
+I <- svm_rfe_error(X, y,test= X_test, y_test = y_test)
+J <- svm_rfe(X, y, 0.1)
+```
+
+
+# SF12 MCS: 
+
+```{r}
+mcs_train <- sf12_mcs[train_idx]
+mcs_test <- sf12_mcs[-train_idx]
+
+X <- data.matrix(train)
+y <- mcs_train
+X_test <- data.matrix(test)
+y_test <- mcs_test
+I <- svm_rfe_error2(X, y, test = X_test, y_test = y_test)
+J <- svm_rfe(X, y, 0.1)
+```
+
+# SF12 PCS: 
+
+
+```{r}
+pcs_train <- sf12_pcs[train_idx]
+pcs_test <- sf12_pcs[-train_idx]
+
+X <- data.matrix(train)
+y <- pcs_train
+X_test <- data.matrix(test)
+y_test <- pcs_test
+I <- svm_rfe_error2(X, y, test = X_test, y_test = y_test)
+J <- svm_rfe(X, y, 0.1)
+```
+
+# Plot variable importance for SVM-RFE
+
+```{r}
+theme_set(theme_bw())
+rankings <- I
+variables <- colnames(train)
+dat <- data.frame(variables,rankings)
+dat2 <- dat[order(dat$rankings),]
+dat2 <- dat2[1:10,]
+pdf("ranks_hyp_final.pdf")
+par(mfrow = c(1, 1),pty="s")
+ggplot(dat2, aes(x=variables, y=1/rankings)) + 
+  geom_point(size=3) + 
+  geom_segment(aes(x=variables, 
+                   xend=variables, 
+                   y=0, 
+                   yend=1/rankings)) + 
+  labs(title="SVM-RFE", xlab = "Rankings", ylab = "") + coord_flip() + theme(axis.title.x=element_blank(),axis.text.x=element_blank())
+dev.off()
+```
+
+
+### Group Lasso: 
+
+```{r}
+library(gglasso)
+```
+
+```{r}
+idx <- list()
+for(i in 1:length(num_levels)){
+  temp <- rep(i,num_levels[i]-1)
+  idx <- c(idx,temp)
+}
+index <- unlist(idx) # grouping of columns to pass to lasso function 
+```
+
+```{r}
+set.seed(1)
+df2 <- df
+train_idx <- sample(seq_len(nrow(df2)), size = 0.9*nrow(df2))
+train <- df2[train_idx,]
+test <- df2[-train_idx,]
+```
+
+# Depression: 
+
+```{r}
+dep_train <- depression[train_idx]
+dep_test <- depression[-train_idx]
+idx <- which(dep_train == 0)
+dep_train[idx] <- -1
+idx <- which(dep_test == 0)
+dep_test[idx] <- -1
+
+cv <- cv.gglasso(as.matrix(train),dep_train, group = index, loss = "logit", pred.loss = "misclass",nfolds=5)
+pre <- coef(cv$gglasso.fit, s = cv$lambda.min)
+rownames(pre)[which(pre!=0)]
+
+preds_dep <- predict(cv$gglasso.fit, newx = as.matrix(test), s = cv$lambda.min, type = "class")
+mean(preds_dep != dep_test) # test error 
+```
+
+# Hypertension: 
+
+```{r}
+hyp_train <- hypertension[train_idx]
+hyp_test <- hypertension[-train_idx]
+idx <- which(hyp_train == 0)
+hyp_train[idx] <- -1
+idx <- which(hyp_test == 0)
+hyp_test[idx] <- -1
+
+cv2 <- cv.gglasso(as.matrix(train),hyp_train, group = index, loss = "logit", pred.loss = "misclass",nfolds=5)
+pre2 <- coef(cv2$gglasso.fit, s = cv2$lambda.min)
+rownames(pre2)[which(pre2!=0)]
+
+preds_hyp <- predict(cv2$gglasso.fit, newx = as.matrix(test), s = cv2$lambda.min, type = "class")
+mean(preds_hyp != hyp_test)
+```
+
+# SF12 MCS: 
+
+```{r}
+mcs_train <- sf12_mcs[train_idx]
+mcs_test <- sf12_mcs[-train_idx]
+
+cv3 <- cv.gglasso(as.matrix(train),mcs_train, group = index, loss = "ls", pred.loss = "L1",nfolds=5)
+pre3 <- coef(cv3$gglasso.fit, s = cv3$lambda.min)
+rownames(pre3)[which(pre3!=0)]
+
+preds_mcs <- predict(cv3$gglasso.fit, newx = as.matrix(test), s = cv3$lambda.min, type = "link")
+mse <- mean((mcs_test - preds_mcs)^2)
+mse
+```
+
+
+# SF12 PCS: 
+
+```{r}
+pcs_train <- sf12_pcs[train_idx]
+pcs_test <- sf12_pcs[-train_idx]
+
+cv4 <- cv.gglasso(as.matrix(train),pcs_train, group = index, loss = "ls", pred.loss = "L1",nfolds=5)
+pre4 <- coef(cv4$gglasso.fit, s = cv4$lambda.min)
+rownames(pre4)[which(pre4!=0)]
+
+preds_pcs <- predict(cv4$gglasso.fit, newx = as.matrix(test), s = cv4$lambda.min, type = "link")
+mse2 <- mean((pcs_test - preds_pcs)^2)
+mse2
+```
+
+
+
+### RANDOM FORESTS: 
+
+```{r}
+data <- data.frame(matrix(unlist(x), nrow=length(x), byrow=T))
+data <- t(data)
+colnames(data) <- colnames(x)
+data <- data.frame(study,data)
+
+for(i in 1:ncol(data)){
+  data[,i] <- as.factor(data[,i])
+}
+```
+
+
+```{r}
+# split into training and test
+set.seed(1)
+train_idx <- sample(seq_len(nrow(data)), size = 0.9*nrow(data))
+train <- data[train_idx,]
+test <- data[-train_idx,]
+```
+
+# Depression: 
+```{r}
+data1 <- train
+data1_test <- test
+data1$depression <- depression[train_idx]
+data1$depression <- as.factor(data1$depression)
+data1_test$depression <- depression[-train_idx]
+data1_test$depression <- as.factor(data1_test$depression)
+
+f1 <- randomForest(depression ~ ., data = data1, importance = TRUE) 
+preds1 <- predict(f1, data1_test)
+error1 <- mean(preds1 != data1_test$depression)
+error1
+
+#plot: 
+pdf("impt_dep.pdf")
+par(mfrow = c(1, 1),pty="s")
+varImpPlot(f1,sort = T, n.var=10, main="Variable Importance - Depression")
+dev.off()
+```
+
+# Hypertension: 
+
+```{r}
+data2 <- train
+data2_test <- test
+data2$hypertension <- hypertension[train_idx]
+data2$hypertension <- as.factor(data2$hypertension)
+data2_test$hypertension <- hypertension[-train_idx]
+data2_test$hypertension <- as.factor(data2_test$hypertension)
+
+f2 <- randomForest(hypertension ~ ., data = data2, importance = TRUE) 
+preds2 <- predict(f2, data2_test)
+error2 <- mean(preds2 != data2_test$hypertension)
+error2 
+
+#plot: 
+pdf("impt_hyp.pdf")
+par(mfrow = c(1, 1),pty="s")
+varImpPlot(f2,sort = T, n.var=10, main="Variable Importance - Hypertension")
+dev.off()
+```
+
+
+# SF12 MCS: 
+
+
+```{r}
+data3 <- train
+data3_test <- test
+data3$sf12_mcs <- sf12_mcs[train_idx]
+data3_test$sf12_mcs <- sf12_mcs[-train_idx]
+
+f3 <- randomForest(sf12_mcs ~ ., dsata = data3, importance = TRUE) 
+preds3 <- predict(f3, data3_test)
+
+error3 <- mean((data3_test$sf12_mcs - preds3)^2)
+error3 <- mean(preds3 != data3_test$sf12_mcs)
+error3
+
+#plot: 
+pdf("impt_mcs.pdf")
+par(mfrow = c(1, 1),pty="s")
+varImpPlot(f3,sort = T, n.var=10, main="Variable Importance - SF12-MCS")
+dev.off()
+```
+
+
+
+# SF12 PCS: 
+
+```{r}
+data4 <- train
+data4_test <- test
+data4$sf12_pcs <- sf12_pcs[train_idx]
+data4_test$sf12_pcs <- sf12_pcs[-train_idx]
+
+f4 <- randomForest(sf12_pcs ~ ., data = data4, importance = TRUE) 
+preds4 <- predict(f4, data4_test)
+error4 <- mean((data4_test$sf12_pcs- preds4)^2)
+error4
+
+#plot: 
+pdf("impt_pcs.pdf")
+par(mfrow = c(1, 1),pty="s")
+varImpPlot(f4,sort = T, n.var=10, main="Variable Importance - SF12-PCS")
+dev.off()
+```
+
+## Stepwise Regression: 
+
+```{r}
+data <- data.frame(matrix(unlist(x), nrow=length(x), byrow=T))
+data <- t(data)
+colnames(data) <- colnames(x)
+data <- data.frame(study,data)
+for(i in 1:ncol(data)){
+  data[,i] <- as.factor(data[,i])
+}
+```
+
+```{r}
+# split into training and test 
+set.seed(1)
+train_idx <- sample(seq_len(nrow(data)), size = 0.9*nrow(data))
+train <- data[train_idx,]
+test <- data[-train_idx,]
+```
+
+# Depression
+
+```{r}
+data1 <- train
+data1_test <- test
+data1$depression <- depression[train_idx]
+data1_test$depression <- depression[-train_idx]
+
+glm1_full <- glm(depression ~ ., family = binomial, data = data1)
+m1 <- step(glm1_empty, scope=list(lower=formula(glm1_empty),upper=formula(glm1_full)), direction = "both", trace =1)
+summary(m1)
+
+preds <- predict(m1, data1_test, type = "response")
+logm_pred1 <- ifelse(preds > 0.5,1,0)
+logm_pred1 <- as.vector(logm_pred1)
+mean(logm_pred1 != data1_test$depression)
+```
+
+# Hypertension:
+
+```{r}
+data2 <- train
+data2_test <- test
+data2$hypertension <- hypertension[train_idx]
+data2_test$hypertension <- hypertension[-train_idx]
+
+glm2_full <- glm(hypertension ~ ., family = binomial, data = data2)
+m2 <- step(glm2_empty, scope=list(lower=formula(glm2_empty),upper=formula(glm2_full)), direction = "both", trace =1)
+
+preds <- predict(m2, data2_test, type = "response")
+logm_pred2 <- ifelse(preds > 0.5,1,0)
+logm_pred2 <- as.vector(logm_pred2)
+mean(logm_pred2 != data2_test$hypertension)
+```
+
+# SF12 MCS: 
+
+```{r}
+data3 <- train
+data3_test <- test
+data3$sf12_mcs <- sf12_mcs[train_idx]
+data3_test$sf12_mcs <- sf12_mcs[-train_idx]
+
+m_full <- lm(sf12_mcs ~ ., data=data3)
+preds <- predict(msf_full, data3_test, type = "response")
+mse <- mean((data3_test$sf12_mcs - as.vector(preds))^2)
+mse
+```
+
+# SF12 PCS: 
+
+```{r}
+data4 <- train
+data4_test <- test
+data4$sf12_pcs <- sf12_pcs[train_idx]
+data4_test$sf12_pcs <- sf12_pcs[-train_idx]
+
+m2_full <- lm(sf12_pcs ~ ., data=data4) #.-rs1b
+preds <- predict(msf2_full, data4_test, type = "response")
+mse2 <- mean((data4_test$sf12_pcs - as.vector(preds))^2)
+mse2
+```
