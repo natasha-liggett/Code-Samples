@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Federalist Papers Scrape
+Code to Scrape Federalist Papers
 
 @author: natashaliggett
 """
